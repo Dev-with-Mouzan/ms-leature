@@ -429,19 +429,24 @@ export async function createReview(review: ValidReview): Promise<Review> {
 Run: `npm run typecheck`
 Expected: clean.
 
-- [ ] **Step 3: Prove the round trip against the local file**
+- [ ] **Step 3: Note the round-trip is verified in Task 4, not here**
 
-Run:
+`lib/reviews.ts` imports `./db` without a file extension, which Next resolves but plain
+Node does not. Running `node -e "import('./lib/reviews.ts')"` therefore fails with
+`ERR_MODULE_NOT_FOUND` and this is expected — do not add `.ts` extensions to app code or
+`allowImportingTsExtensions` to tsconfig just to make a scratch script work.
+
+The insert and read paths are proven through the running app instead: Task 4 posts a
+real review over HTTP and expects `201`, and Task 7 renders the home page and checks
+the review text appears. Delete any local database left over from a failed attempt:
+
+Run: `Remove-Item -ErrorAction SilentlyContinue reviews.db`
+Expected: file gone, and `git status --short` shows no `reviews.db`.
+
+- [ ] **Step 5: Commit**
+
 ```bash
-node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --input-type=module -e "import { createReview, getReviews } from './lib/reviews.ts'; import { books } from './lib/books.ts'; await createReview({ book_slug: books[0].slug, author_name: 'Plan Check', body: 'Round trip through the local SQLite file.' }); const rows = await getReviews(); console.log(rows.length, rows[0].author_name, rows[0].book_slug === books[0].slug);"
-```
-Expected: prints `1 Plan Check true`.
-
-- [ ] **Step 4: Clean the test row and commit**
-
-```bash
-Remove-Item -ErrorAction SilentlyContinue reviews.db
-git add lib/reviews.ts
+git add lib/reviews.ts docs/superpowers/plans/2026-10-02-book-reviews.md
 git commit -m "feat: read and write reviews"
 ```
 
