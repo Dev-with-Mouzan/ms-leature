@@ -876,7 +876,7 @@ Insert a temporary row into the local database, then run `npm run build && npm s
 node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --input-type=module -e "import { createReview } from './lib/reviews.ts'; import { books } from './lib/books.ts'; for (let i = 0; i < 5; i++) await createReview({ book_slug: books[0].slug, author_name: 'Reader ' + i, body: 'Sample review number ' + i + ' used to check the carousel renders four cards and scrolls.' });"
 ```
 
-Expected: `curl http://localhost:3000/` contains `From readers`, `What people say`, and five `Reader ` names.
+Expected: `curl http://localhost:<port npm start prints>/` contains `From readers`, `What people say`, and five `Reader ` names.
 
 - [ ] **Step 6: Clean up and commit**
 
