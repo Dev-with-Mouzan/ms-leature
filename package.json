@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON lib/validate-review.check.mts"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
