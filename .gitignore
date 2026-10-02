@@ -1,0 +1,18 @@
+node_modules/
+.next/
+out/
+build/
+.env*.local
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# local verification artifacts
+.shots/
+.server.log
+.chrome.log
+.verify.mjs
+.fontdebug.mjs
+
+# local reviews database (fallback when TURSO_* is unset)
+reviews.db
