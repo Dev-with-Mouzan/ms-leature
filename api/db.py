@@ -16,6 +16,13 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./api.db")
 
+# Neon and Vercel hand out plain postgres:// / postgresql:// URLs, which
+# SQLAlchemy routes to the legacy psycopg2 driver. requirements.txt ships
+# psycopg3 instead, so the scheme is upgraded here and any Neon URL pasted
+# as-is connects with the driver that is actually installed.
+if DATABASE_URL.startswith(("postgres://", "postgresql://")):
+    DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL.split("//", 1)[1]
+
 # SQLite needs the connection thread check relaxed; Postgres does not accept
 # the argument at all.
 _connect_args = (
