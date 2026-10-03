@@ -1,0 +1,105 @@
+"""Admin authentication.
+
+Two jobs: check a password against the bcrypt hash in the database, and issue
+/verify a bearer token for subsequent admin requests.
+
+The token is an HMAC-signed `username|expiry` pair rather than a session row:
+no table to clean up, no extra dependency, and it is stateless across function
+instances. The secret lives in `ADMIN_TOKEN_SECRET` and is never in the repo.
+
+The Next.js side keeps this token in an httpOnly cookie and only ever forwards
+it server-to-server, so a browser cannot read or forge it.
+"""
+
+import base64
+import hmac
+import os
+import time
+from hashlib import sha256
+
+import bcrypt
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
+
+from .db import get_db
+from .models import Admin
+
+TOKEN_TTL = int(os.environ.get("ADMIN_TOKEN_TTL", str(12 * 3600)))
+
+# bcrypt only considers the first 72 bytes of a password and raises beyond it.
+_BCRYPT_MAX_BYTES = 72
+
+
+def _secret() -> bytes:
+    secret = os.environ.get("ADMIN_TOKEN_SECRET")
+    if not secret:
+        # Fail closed: without a secret we cannot sign or verify anything, and
+        # silently allowing logins would be worse than refusing them.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_TOKEN_SECRET is not set on the server.",
+        )
+    return secret.encode()
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode()[:_BCRYPT_MAX_BYTES], bcrypt.gensalt()).decode()
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(
+            password.encode()[:_BCRYPT_MAX_BYTES], password_hash.encode()
+        )
+    except ValueError:
+        # Malformed hash in the database. Deny rather than crash.
+        return False
+
+
+def make_token(username: str) -> str:
+    payload = f"{username}|{int(time.time()) + TOKEN_TTL}".encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    signature = hmac.new(_secret(), payload, sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def read_token(token: str) -> str | None:
+    """Return the username if the token is authentic and unexpired."""
+    try:
+        encoded, signature = token.split(".", 1)
+    except ValueError:
+        return None
+
+    padding = "=" * (-len(encoded) % 4)
+    try:
+        payload = base64.urlsafe_b64decode(encoded + padding)
+    except (ValueError, TypeError):
+        return None
+
+    expected = hmac.new(_secret(), payload, sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+
+    username, _, expiry = payload.decode().partition("|")
+    if not expiry.isdigit() or int(expiry) < time.time():
+        return None
+    return username
+
+
+def require_admin(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Admin:
+    """FastAPI dependency guarding every mutating admin endpoint."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in to continue."
+        )
+
+    username = read_token(authorization.split(" ", 1)[1].strip())
+    admin = db.query(Admin).filter(Admin.username == username).first() if username else None
+    if admin is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired."
+        )
+    return admin
