@@ -1,18 +1,24 @@
-node_modules/
-.next/
-out/
-build/
-.env*.local
-.DS_Store
-*.tsbuildinfo
-next-env.d.ts
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
 
-# local verification artifacts
+# Local database. Recreate with: python -m api.seed
+*.db
+
+# Node / Vite
+node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env*.local
+
+# OS
+.DS_Store
+
+# Local verification artifacts
 .shots/
 .server.log
-.chrome.log
-.verify.mjs
-.fontdebug.mjs
-
-# local reviews database (fallback when TURSO_* is unset)
-reviews.db
