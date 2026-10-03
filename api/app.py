@@ -76,10 +76,12 @@ app.include_router(public, prefix="/api")
 app.include_router(public_review, prefix="/api")
 app.include_router(admin, prefix="/api")
 
-# Uploaded covers. Created on first upload, so the mount is conditional rather
-# than shipping an empty directory in the repo.
-MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+# Uploaded covers. The directory is created lazily by the upload route, never
+# here: a serverless filesystem is read-only, so creating it at import time
+# would crash the whole app before a single route is served. check_dir=False
+# lets the mount exist while the directory does not — requests just 404 until
+# the first upload makes it.
+app.mount("/media", StaticFiles(directory=MEDIA_DIR, check_dir=False), name="media")
 
 # Pages that always exist. The catalogue entries are added below.
 STATIC_PAGES = ["", "books", "poems", "about", "contact"]
