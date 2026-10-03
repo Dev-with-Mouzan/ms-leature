@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPoem, getPoems } from "@/lib/api";
+import { getPoem } from "@/lib/api";
 
 type Params = { params: Promise<{ slug: string }> };
 
