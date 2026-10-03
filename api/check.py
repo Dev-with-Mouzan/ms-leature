@@ -200,5 +200,12 @@ check("deleting twice is a 404", r.status_code == 404, r.text)
 r = client.delete("/admin/poems/first-poem", headers=AUTH)
 check("poem deleted", r.status_code == 200 and client.get("/poems").json() == [], r.text)
 
-os.remove(_TMP_DB)
 print(f"api check: {passed} assertions passed")
+
+# Cleanup must never turn a passing run into a failing one, so the summary is
+# printed first and a locked file is tolerated — it lives in TEMP either way.
+engine.dispose()
+try:
+    os.remove(_TMP_DB)
+except OSError:
+    pass
