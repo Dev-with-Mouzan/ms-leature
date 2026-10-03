@@ -14,10 +14,13 @@ page counts or reception.
 
 import os
 import sys
+from datetime import timedelta
+
+from sqlalchemy import inspect, text
 
 from . import models  # noqa: F401  (imported so the metadata is registered)
 from .auth import hash_password
-from .db import Base, SessionLocal, engine
+from .db import Base, SessionLocal, engine, utcnow
 from .models import Admin, Book
 
 # Slugs are written out explicitly rather than derived from the title: these
@@ -38,6 +41,7 @@ SEED_BOOKS = [
         "cover_image": "/images/magar-manzar-nahi-mera.png",
         "category": "poetry",
         "author": "Mujahid Sajjad",
+        "published_year": 2026,
         "sort_order": 0,
     },
     {
@@ -54,6 +58,7 @@ SEED_BOOKS = [
         "cover_image": "/images/Article of Ghazala Anjum on the Poetry collection of Mujahid Sajjad.png",
         "category": "criticism",
         "author": "Ghazala Anjum",
+        "published_year": 2026,
         "sort_order": 1,
     },
     {
@@ -70,13 +75,65 @@ SEED_BOOKS = [
         "cover_image": "/images/the-listening-eye-the-seeing-heart.png",
         "category": "other",
         "author": "Dr Syed Shabih ul Hassan Rizvi",
+        "published_year": 2026,
         "sort_order": 2,
     },
 ]
 
 
+def _add_missing_columns() -> None:
+    """Bring an existing database up to the current models.
+
+    `create_all` only ever creates tables, so a column added to a model later
+    is silently absent from a database that already existed. Reviews gained
+    `is_approved` and verses gained `type` after the first release, and this
+    is the only place those differences can be reconciled. Both databases
+    spell booleans differently, so the DDL differs; neither statement is
+    allowed to fail twice.
+    """
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+
+    if "reviews" in tables and "is_approved" not in {
+        c["name"] for c in inspector.get_columns("reviews")
+    }:
+        # `BOOLEAN NOT NULL DEFAULT 0` is accepted by SQLite and Postgres alike.
+        # The default matters on SQLite, which cannot add a NOT NULL column without
+        # one.
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE reviews ADD COLUMN is_approved BOOLEAN NOT NULL DEFAULT 0")
+            )
+        print("added reviews.is_approved")
+
+    if "poems" in tables and "type" not in {
+        c["name"] for c in inspector.get_columns("poems")
+    }:
+        # Nullable on purpose: rows written before the field existed stay
+        # readable, and the admin form supplies a value from then on.
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE poems ADD COLUMN type VARCHAR(16)"))
+        print("added poems.type")
+
+    if "books" in tables and "created_at" not in {
+        c["name"] for c in inspector.get_columns("books")
+    }:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE books ADD COLUMN created_at TIMESTAMP"))
+        # Backfill so the row inserted last is the newest: the home page
+        # features the book with the latest created_at.
+        db = SessionLocal()
+        now = utcnow()
+        for offset, book in enumerate(db.query(Book).order_by(Book.id.desc()).all()):
+            book.created_at = now - timedelta(seconds=offset)
+        db.commit()
+        db.close()
+        print("added books.created_at")
+
+
 def main() -> int:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
     db = SessionLocal()
 
     username = os.environ.get("ADMIN_USERNAME")

@@ -7,6 +7,8 @@ would only add a type mismatch for the frontend to reconcile.
 
 import re
 import unicodedata
+from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
@@ -90,12 +92,18 @@ class BookUpdate(BookBase):
 
 class BookOut(BookBase):
     slug: str
+    # Present so the home page can feature the newest book first. Null only
+    # for a row written before the column existed and never migrated.
+    created_at: datetime | None = None
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
 class PoemBase(WireModel):
     title: str = Field(min_length=1, max_length=300)
     body: str = Field(default="", max_length=20000)
+    # Null only for a row read from before the field existed; a write without
+    # it lands on the same default the form starts on.
+    type: Literal["Ghazal", "Nazm", "Poem"] | None = "Ghazal"
 
     @field_validator("title", "body")
     @classmethod
@@ -113,6 +121,9 @@ class PoemUpdate(PoemBase):
 
 class PoemOut(PoemBase):
     slug: str
+    # Present so a listing can be ordered and dated: the admin dashboard sorts
+    # by it, and the sitemap already reads it off the model.
+    created_at: datetime
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
@@ -149,7 +160,50 @@ class ReviewOut(WireModel):
     book_title: str
     name: str
     body: str
+    is_approved: bool = False
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+
+class ReviewModerationIn(WireModel):
+    is_approved: bool
+
+
+class ContactIn(WireModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: str = Field(min_length=5, max_length=200)
+    topic: str = Field(default="general", max_length=60)
+    body: str = Field(min_length=10, max_length=5000)
+    # Same honeypot as reviews.
+    website: str = Field(default="", max_length=200)
+
+    @field_validator("name", "email", "topic")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("email")
+    @classmethod
+    def _email_shape(cls, v: str) -> str:
+        # Deliberately shape-only. Pydantic's EmailStr would need the optional
+        # email-validator package for no gain here: this address is only ever
+        # shown in the admin, and a malformed one is obvious on sight.
+        if "@" not in v or v.startswith("@") or v.endswith("@") or " " in v:
+            raise ValueError("that does not look like an email address")
+        return v
+
+
+class ContactOut(WireModel):
+    id: int
+    name: str
+    email: str
+    topic: str
+    body: str
+    created_at: datetime
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+
+class AdminOut(WireModel):
+    username: str
 
 
 class MessageOut(WireModel):

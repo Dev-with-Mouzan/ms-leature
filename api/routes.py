@@ -7,26 +7,75 @@ serialisation helpers.
 
 import time
 from collections import defaultdict
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session, joinedload
 
-from .auth import make_token, require_admin, verify_password
+from .auth import (
+    clear_session_cookie,
+    make_token,
+    optional_admin,
+    require_admin,
+    set_session_cookie,
+    verify_password,
+)
 from .db import get_db
-from .models import Admin, Book, Poem, Review
+from .models import Admin, Book, ContactMessage, Poem, Review
 from .schemas import (
+    AdminOut,
     BookCreate,
     BookOut,
     BookUpdate,
+    ContactIn,
+    ContactOut,
     LoginIn,
+    MessageOut,
     PoemCreate,
     PoemOut,
     PoemUpdate,
     ReviewIn,
+    ReviewModerationIn,
     ReviewOut,
     SLUG_RE,
     slugify,
 )
+
+# ---------------------------------------------------------------------------
+# Cover uploads
+# ---------------------------------------------------------------------------
+
+MEDIA_DIR = Path(__file__).resolve().parent / "media"
+MAX_COVER_BYTES = 8 * 1024 * 1024
+
+# Keyed by extension: the magic bytes each format must start with. Checking the
+# declared content-type alone would let anything through, since the client
+# chooses it.
+IMAGE_TYPES = {
+    "png": b"\x89PNG\r\n\x1a\n",
+    "jpg": b"\xff\xd8\xff",
+    "jpeg": b"\xff\xd8\xff",
+    "webp": b"RIFF",
+    "avif": b"\x00\x00\x00 ftypavif",
+}
+
+# What the browser is allowed to claim it is sending.
+IMAGE_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp", "image/avif"}
+
+
+def _sniff_image(data: bytes, ext: str) -> bool:
+    return data.startswith(IMAGE_TYPES[ext])
+
 
 # ---------------------------------------------------------------------------
 # Review rate limiting
@@ -70,6 +119,7 @@ def _review_out(review: Review) -> ReviewOut | None:
         book_title=review.book.title,
         name=review.name,
         body=review.body,
+        is_approved=review.is_approved,
     )
 
 
@@ -120,12 +170,11 @@ def read_poem(slug: str, db: Session = Depends(get_db)):
 
 
 @public.get("/reviews", response_model=list[ReviewOut])
-def list_reviews(
-    limit: int = 12, db: Session = Depends(get_db)
-):
+def list_reviews(limit: int = 12, db: Session = Depends(get_db)) -> list[ReviewOut]:
     rows = (
         db.query(Review)
         .options(joinedload(Review.book))
+        .filter(Review.is_approved.is_(True))
         .order_by(Review.created_at.desc())
         .limit(max(1, min(limit, 100)))
         .all()
@@ -134,12 +183,12 @@ def list_reviews(
 
 
 @public.get("/books/{slug}/reviews", response_model=list[ReviewOut])
-def list_reviews_for_book(slug: str, db: Session = Depends(get_db)):
+def list_reviews_for_book(slug: str, db: Session = Depends(get_db)) -> list[ReviewOut]:
     rows = (
         db.query(Review)
         .options(joinedload(Review.book))
         .join(Book)
-        .filter(Book.slug == slug)
+        .filter(Book.slug == slug, Review.is_approved.is_(True))
         .order_by(Review.created_at.desc())
         .all()
     )
@@ -153,7 +202,7 @@ def list_reviews_for_book(slug: str, db: Session = Depends(get_db)):
 public_review = APIRouter()
 
 
-@public_review.post("/reviews", response_model=ReviewOut, status_code=status.HTTP_201_CREATED)
+@public_review.post("/reviews", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
 def submit_review(payload: ReviewIn, request: Request, db: Session = Depends(get_db)):
     # Honeypot filled: answer as if it worked, so a bot learns nothing.
     if payload.website:
@@ -173,11 +222,40 @@ def submit_review(payload: ReviewIn, request: Request, db: Session = Depends(get
             detail="Too many submissions. Try again later.",
         )
 
-    review = Review(book=book, name=payload.name, body=payload.body)
+    # Published immediately: honeypot and rate limit are the spam defence, and
+    # the admin can still unpublish anything that slips through.
+    review = Review(book=book, name=payload.name, body=payload.body, is_approved=True)
     db.add(review)
     db.commit()
-    db.refresh(review)
-    return _review_out(review)
+    return MessageOut(detail="Thank you. Your review has been published.")
+
+
+@public_review.post("/contact", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
+def submit_contact(payload: ContactIn, request: Request, db: Session = Depends(get_db)):
+    """Store a contact message for the author to read in the admin.
+
+    Answers as if it worked when the honeypot is filled, for the same reason
+    the review endpoint does: a bot that gets an error learns it was detected.
+    """
+    if payload.website:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Submission rejected."
+        )
+
+    if _rate_limited(_client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many messages. Try again later.",
+        )
+
+    db.add(
+        ContactMessage(
+            name=payload.name, email=payload.email, topic=payload.topic, body=payload.body
+        )
+    )
+    db.commit()
+    # No address is echoed back in the response.
+    return MessageOut(detail="Thank you. Your message has been sent.")
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +266,7 @@ admin = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @admin.post("/login", tags=["auth"])
-def login(payload: LoginIn, db: Session = Depends(get_db)):
+def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
     admin_user = db.query(Admin).filter(Admin.username == payload.username).first()
     # Same message and roughly the same work either way, so the response does
     # not reveal whether the username exists.
@@ -196,7 +274,21 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Wrong username or password."
         )
-    return {"token": make_token(admin_user.username)}
+    set_session_cookie(response, make_token(admin_user.username))
+    return AdminOut(username=admin_user.username)
+
+
+@admin.post("/logout", tags=["auth"])
+def logout(response: Response):
+    clear_session_cookie(response)
+    return MessageOut(detail="Signed out.")
+
+
+@admin.get("/me", response_model=AdminOut | None, tags=["auth"])
+def me(username: str | None = Depends(optional_admin)):
+    """Always 200. `null` means signed out; an error here would be a server
+    fault, and the SPA should not confuse the two."""
+    return AdminOut(username=username) if username else None
 
 
 def _resolve_slug(db: Session, table, requested: str | None, title: str) -> str:
@@ -263,6 +355,53 @@ def delete_book(slug: str, db: Session = Depends(get_db), _: Admin = Depends(req
     return {"ok": True}
 
 
+@admin.post("/books/{slug}/cover", response_model=BookOut)
+def upload_cover(
+    slug: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: Admin = Depends(require_admin),
+):
+    """Store an uploaded cover and point the book at it.
+
+    The filename is generated, never taken from the client, so a crafted
+    `../../etc/passwd` has nowhere to land. The extension is checked against an
+    allowlist and the bytes are sniffed, so a `.png` that is really something
+    else never reaches the media directory.
+    """
+    book = db.query(Book).filter(Book.slug == slug).first()
+    if book is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    ext = Path(file.filename or "").suffix.lower().lstrip(".")
+    if (file.content_type or "") not in IMAGE_CONTENT_TYPES or ext not in IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Upload a PNG, JPEG, WebP or AVIF image.",
+        )
+
+    data = file.file.read(MAX_COVER_BYTES + 1)
+    if len(data) > MAX_COVER_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Cover must be under {MAX_COVER_BYTES // (1024 * 1024)} MB.",
+        )
+    if not _sniff_image(data, ext):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="That file is not a readable image.",
+        )
+
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid4().hex}.{ext}"
+    (MEDIA_DIR / name).write_bytes(data)
+
+    book.cover_image = f"/media/{name}"
+    db.commit()
+    db.refresh(book)
+    return book
+
+
 @admin.post("/poems", response_model=PoemOut, status_code=status.HTTP_201_CREATED)
 def create_poem(payload: PoemCreate, db: Session = Depends(get_db), _: Admin = Depends(require_admin)):
     slug = _resolve_slug(db, Poem, payload.slug, payload.title)
@@ -308,5 +447,79 @@ def delete_poem(slug: str, db: Session = Depends(get_db), _: Admin = Depends(req
     if poem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     db.delete(poem)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Review moderation
+# ---------------------------------------------------------------------------
+
+
+def _review_by_id(db: Session, review_id: int) -> Review:
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if review is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return review
+
+
+@admin.get("/reviews", response_model=list[ReviewOut])
+def list_all_reviews(
+    pending_only: bool = False, db: Session = Depends(get_db), _: Admin = Depends(require_admin)
+):
+    query = db.query(Review).options(joinedload(Review.book))
+    if pending_only:
+        query = query.filter(Review.is_approved.is_(False))
+    return _review_outs(query.order_by(Review.created_at.desc()).all())
+
+
+@admin.put("/reviews/{review_id}", response_model=ReviewOut)
+def moderate_review(
+    review_id: int,
+    payload: ReviewModerationIn,
+    db: Session = Depends(get_db),
+    _: Admin = Depends(require_admin),
+):
+    review = _review_by_id(db, review_id)
+    review.is_approved = payload.is_approved
+    db.commit()
+    db.refresh(review)
+    return _review_out(review)
+
+
+@admin.delete("/reviews/{review_id}")
+def delete_review(
+    review_id: int, db: Session = Depends(get_db), _: Admin = Depends(require_admin)
+):
+    db.delete(_review_by_id(db, review_id))
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Contact messages
+# ---------------------------------------------------------------------------
+
+
+@admin.get("/messages", response_model=list[ContactOut])
+def list_messages(
+    limit: int = 100, db: Session = Depends(get_db), _: Admin = Depends(require_admin)
+):
+    return (
+        db.query(ContactMessage)
+        .order_by(ContactMessage.created_at.desc())
+        .limit(max(1, min(limit, 500)))
+        .all()
+    )
+
+
+@admin.delete("/messages/{message_id}")
+def delete_message(
+    message_id: int, db: Session = Depends(get_db), _: Admin = Depends(require_admin)
+):
+    message = db.query(ContactMessage).filter(ContactMessage.id == message_id).first()
+    if message is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    db.delete(message)
     db.commit()
     return {"ok": True}

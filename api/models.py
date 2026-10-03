@@ -39,6 +39,10 @@ class Book(Base):
     publication: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Display order. The first book by the site author is the featured one.
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # Nullable only so a table created before this column can be altered in
+    # place; the default fills it from then on. The home page features the
+    # newest book by this timestamp.
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=utcnow)
 
     reviews: Mapped[list["Review"]] = relationship(
         back_populates="book", cascade="all, delete-orphan", passive_deletes=True
@@ -52,6 +56,9 @@ class Poem(Base):
     slug: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text, default="")
+    # Ghazal, Nazm or Poem. Nullable so rows written before this field existed
+    # keep loading; the admin form always sends one.
+    type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -66,5 +73,26 @@ class Review(Base):
         ForeignKey("books.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(60))
+    body: Mapped[str] = mapped_column(Text)
+    # Reviews arrive unapproved and only reach the public feeds once an admin
+    # has read them. Defaulting to False is the safe direction: a forgotten
+    # moderation queue shows an empty section, never unvetted praise.
+    is_approved: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ContactMessage(Base):
+    """A message sent through the contact form.
+
+    Newest first when listed. `topic` is free text rather than an enum so a new
+    reason can be added on the form without a schema migration.
+    """
+
+    __tablename__ = "contact_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str] = mapped_column(String(200))
+    topic: Mapped[str] = mapped_column(String(60), default="general")
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

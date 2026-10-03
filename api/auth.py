@@ -7,8 +7,10 @@ The token is an HMAC-signed `username|expiry` pair rather than a session row:
 no table to clean up, no extra dependency, and it is stateless across function
 instances. The secret lives in `ADMIN_TOKEN_SECRET` and is never in the repo.
 
-The Next.js side keeps this token in an httpOnly cookie and only ever forwards
-it server-to-server, so a browser cannot read or forge it.
+The token is handed to the browser as an httpOnly cookie, so page JavaScript
+cannot read it and a cross-site script injection cannot exfiltrate it. The API
+and the site are served from the same origin, so there is no CORS surface and
+no `credentials` handling to get wrong.
 """
 
 import base64
@@ -18,13 +20,15 @@ import time
 from hashlib import sha256
 
 import bcrypt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from .db import get_db
 from .models import Admin
 
 TOKEN_TTL = int(os.environ.get("ADMIN_TOKEN_TTL", str(12 * 3600)))
+
+SESSION_COOKIE = "admin_session"
 
 # bcrypt only considers the first 72 bytes of a password and raises beyond it.
 _BCRYPT_MAX_BYTES = 72
@@ -87,19 +91,42 @@ def read_token(token: str) -> str | None:
 
 
 def require_admin(
-    authorization: str | None = Header(default=None),
+    session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     db: Session = Depends(get_db),
 ) -> Admin:
     """FastAPI dependency guarding every mutating admin endpoint."""
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in to continue."
-        )
-
-    username = read_token(authorization.split(" ", 1)[1].strip())
+    username = read_token(session) if session else None
     admin = db.query(Admin).filter(Admin.username == username).first() if username else None
     if admin is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired."
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in to continue."
         )
     return admin
+
+
+def optional_admin(session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> str | None:
+    """Username behind a valid cookie, or None. Used by `/admin/me`, which must
+    answer 200 either way so the SPA can tell "signed out" from "server broken"."""
+    return read_token(session) if session else None
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    # Secure cookies are dropped over plain http on Safari, so the flag follows
+    # SITE_URL rather than being its own knob: an https origin gets a secure
+    # cookie, a localhost origin gets a usable one. COOKIE_SECURE overrides.
+    default_secure = "1" if os.environ.get("SITE_URL", "").startswith("https://") else "0"
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        # httpOnly keeps the token out of reach of page JavaScript; sameSite
+        # stops another origin from driving an authenticated request.
+        httponly=True,
+        samesite="lax",
+        secure=os.environ.get("COOKIE_SECURE", default_secure) == "1",
+        path="/",
+        max_age=TOKEN_TTL,
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/")
