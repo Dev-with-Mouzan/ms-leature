@@ -9,6 +9,7 @@ import { siteConfig } from "@/lib/site";
 const navLinks = [
   { href: "/", label: "Home" },
   { href: "/books", label: "Books" },
+  { href: "/poems", label: "Poems" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ];
