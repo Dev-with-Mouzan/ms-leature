@@ -151,7 +151,7 @@ export default async function AboutView() {
 
           <ul className="mt-10 divide-y divide-line border-y border-line">
             {own.map((book) => (
-              <li key={book.id}>
+              <li key={book.slug}>
                 <Link
                   href={`/books/${book.slug}`}
                   className="group flex flex-col gap-1 py-5 transition-colors sm:flex-row sm:items-baseline sm:justify-between sm:gap-8"

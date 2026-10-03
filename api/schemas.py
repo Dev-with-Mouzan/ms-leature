@@ -9,6 +9,7 @@ import re
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic.alias_generators import to_camel
 
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 CATEGORIES = {"poetry", "criticism", "essays", "research", "other"}
@@ -22,7 +23,19 @@ def slugify(value: str) -> str:
     return slug[:120]
 
 
-class BookBase(BaseModel):
+class WireModel(BaseModel):
+    """Serialises as camelCase while the Python attributes stay snake_case.
+
+    FastAPI serialises response models by alias, so the JSON the browser and
+    the Next.js server receive uses `coverImage` / `pdfUrl` — the same names
+    the React components already use. `populate_by_name` keeps snake_case
+    usable as input, so server actions can post either spelling.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class BookBase(WireModel):
     title: str = Field(min_length=1, max_length=300)
     description: str = Field(default="", max_length=8000)
     cover_image: str | None = Field(default=None, max_length=500)
@@ -77,10 +90,10 @@ class BookUpdate(BookBase):
 
 class BookOut(BookBase):
     slug: str
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
-class PoemBase(BaseModel):
+class PoemBase(WireModel):
     title: str = Field(min_length=1, max_length=300)
     body: str = Field(default="", max_length=20000)
 
@@ -100,15 +113,15 @@ class PoemUpdate(PoemBase):
 
 class PoemOut(PoemBase):
     slug: str
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
-class LoginIn(BaseModel):
+class LoginIn(WireModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=200)
 
 
-class ReviewIn(BaseModel):
+class ReviewIn(WireModel):
     book_slug: str = Field(max_length=120)
     name: str = Field(min_length=2, max_length=60)
     body: str = Field(min_length=20, max_length=1500)
@@ -127,7 +140,7 @@ class ReviewIn(BaseModel):
         return v.strip()
 
 
-class ReviewOut(BaseModel):
+class ReviewOut(WireModel):
     """`book_title` and `book_slug` are resolved server-side so the carousel
     does not need the full book list just to caption a card."""
 
@@ -136,9 +149,9 @@ class ReviewOut(BaseModel):
     book_title: str
     name: str
     body: str
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
-class MessageOut(BaseModel):
+class MessageOut(WireModel):
     ok: bool = True
     detail: str = ""

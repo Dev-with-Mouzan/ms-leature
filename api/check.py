@@ -142,7 +142,11 @@ check(
     str(sorted(seed_slugs)),
 )
 check("books ordered by sort_order", seeded[0]["slug"] == "magar-manzar-nahi-mera", str(seeded[0]))
-check("missing cover is null, not empty", seeded[0]["cover_image"] is not None, str(seeded[0]))
+check(
+    "missing cover is null, not empty",
+    seeded[0]["coverImage"] is not None,
+    str(seeded[0]),
+)
 
 r = client.get("/books/article-on-the-poetry-of-mujahid-sajjad")
 check("book readable by slug", r.status_code == 200 and r.json()["author"] == "Ghazala Anjum", r.text)
@@ -161,7 +165,11 @@ valid = {
 }
 r = client.post("/reviews", json=valid, headers=as_ip("10.0.0.1"))
 check("valid review returns 201", r.status_code == 201, r.text)
-check("book_title resolved server-side", r.json().get("book_title") == "Reviewed Book", r.text)
+check(
+    "book_title resolved server-side",
+    r.json().get("bookTitle") == "Reviewed Book",
+    r.text,
+)
 
 r = client.post("/reviews", json={**valid, "website": "spam.example"}, headers=as_ip("10.0.0.2"))
 check("honeypot rejected", r.status_code == 400, r.text)
@@ -179,7 +187,7 @@ r = client.get(f"/books/{review_slug}/reviews")
 check("book reviews listed", len(r.json()) == 1, r.text)
 
 r = client.get("/reviews")
-check("review carries book title on the home feed", r.json()[0]["book_title"] == "Reviewed Book", r.text)
+check("review carries book title on the home feed", r.json()[0]["bookTitle"] == "Reviewed Book", r.text)
 
 print("rate limit")
 codes = [

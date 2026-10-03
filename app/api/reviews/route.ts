@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { books } from "@/lib/books";
+import { getBooks } from "@/lib/api";
 import { createReview } from "@/lib/reviews";
 import { validateReview } from "@/lib/validate-review";
 
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
 
-  const result = validateReview(payload, books.map((book) => book.slug));
+  const result = validateReview(payload, (await getBooks()).map((book) => book.slug));
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }

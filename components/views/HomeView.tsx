@@ -163,7 +163,7 @@ export default async function HomeView() {
 
             <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {library.map((book, i) => (
-                <Reveal key={book.id} delay={i * 80}>
+                <Reveal key={book.slug} delay={i * 80}>
                   <BookCard book={book} compact />
                 </Reveal>
               ))}

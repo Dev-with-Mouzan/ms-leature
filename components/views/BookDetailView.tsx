@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, BookOpen, Download, Tag, User } from "lucide-react";
 import type { Book } from "@/lib/books";
 import { categoryLabels, downloadUrl, relatedBooks } from "@/lib/books";
-import type { Review } from "@/lib/reviews";
+import type { Review } from "@/lib/api";
 import { siteConfig } from "@/lib/site";
 import BookCover from "@/components/BookCover";
 import BookCard from "@/components/BookCard";
@@ -143,7 +143,7 @@ export default function BookDetailView({
 
           <div className="mt-8 grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
             {more.map((related, i) => (
-              <Reveal key={related.id} delay={i * 80}>
+              <Reveal key={related.slug} delay={i * 80}>
                 <BookCard book={related} />
               </Reveal>
             ))}

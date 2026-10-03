@@ -48,6 +48,8 @@ export default async function BooksView() {
   );
 }
 
+import type { Book } from "@/lib/books";
+
 function Group({
   title,
   note,
@@ -55,7 +57,7 @@ function Group({
 }: {
   title: string;
   note?: string;
-  books: typeof books;
+  books: Book[];
 }) {
   if (list.length === 0) return null;
 
@@ -69,8 +71,8 @@ function Group({
       </div>
 
       <div className="mt-8 grid gap-7 sm:grid-cols-2">
-        {list.map((book, i) => (
-          <Reveal key={book.id} delay={Math.min(i, 2) * 80}>
+        {list.map((book: Book, i: number) => (
+          <Reveal key={book.slug} delay={Math.min(i, 2) * 80}>
             <BookCard book={book} priority={i === 0} />
           </Reveal>
         ))}
