@@ -53,7 +53,7 @@ export default async function EditBookPage({ params }: Params) {
           ["publishedYear", "Published year", "number", book.publishedYear ?? ""],
           ["pages", "Pages", "number", book.pages ?? ""],
           ["publication", "Publication", "text", book.publication ?? ""],
-          ["sortOrder", "Sort order", "number", book.sortOrder ?? 0],
+          ["sortOrder", "Sort order", "number", 0],
         ].map(([name, label, type, val]) => (
           <div key={name as string} className="flex flex-col gap-2">
             <label htmlFor={name as string} className="text-sm">
@@ -72,7 +72,7 @@ export default async function EditBookPage({ params }: Params) {
                 id={name as string}
                 name={name as string}
                 type={type as string}
-                defaultValue={val as any}
+                defaultValue={val as string | number | readonly string[]}
                 className="min-h-11 rounded border border-line px-3 text-sm"
               />
             )}
