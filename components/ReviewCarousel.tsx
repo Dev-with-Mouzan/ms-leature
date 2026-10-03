@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getBookBySlug } from "@/lib/books";
-import type { Review } from "@/lib/reviews";
+// Type-only import: erased at build time, so this client component does not
+// pull in the server-only data module.
+import type { Review } from "@/lib/api";
 
 const ADVANCE_MS = 4000;
 const GAP_PX = 24;
@@ -53,32 +54,25 @@ export default function ReviewCarousel({ reviews }: { reviews: Review[] }) {
       onBlur={() => setPaused(false)}
       className="flex snap-x snap-mandatory gap-6 overflow-x-auto pb-2"
     >
-      {reviews.map((review) => {
-        const book = getBookBySlug(review.book_slug);
-        return (
-          <figure
-            key={review.id}
-            className="w-[85%] shrink-0 snap-start border border-line bg-cream-50 p-6 sm:w-[calc(50%-0.75rem)] lg:w-[calc(25%-0.75rem)]"
-          >
-            <blockquote className="text-[0.9375rem] leading-relaxed text-ink-900">
-              {review.body}
-            </blockquote>
-            <figcaption className="mt-5 border-t border-line pt-4">
-              <p className="text-sm font-medium text-ink-900">
-                {review.author_name}
-              </p>
-              {book && (
-                <Link
-                  href={`/books/${book.slug}`}
-                  className="mt-1 block text-xs text-muted underline decoration-gold-500 underline-offset-4 transition-colors hover:text-gold-700"
-                >
-                  {book.title}
-                </Link>
-              )}
-            </figcaption>
-          </figure>
-        );
-      })}
+      {reviews.map((review) => (
+        <figure
+          key={review.id}
+          className="w-[85%] shrink-0 snap-start border border-line bg-cream-50 p-6 sm:w-[calc(50%-0.75rem)] lg:w-[calc(25%-0.75rem)]"
+        >
+          <blockquote className="text-[0.9375rem] leading-relaxed text-ink-900">
+            {review.body}
+          </blockquote>
+          <figcaption className="mt-5 border-t border-line pt-4">
+            <p className="text-sm font-medium text-ink-900">{review.name}</p>
+            <Link
+              href={`/books/${review.bookSlug}`}
+              className="mt-1 block text-xs text-muted underline decoration-gold-500 underline-offset-4 transition-colors hover:text-gold-700"
+            >
+              {review.bookTitle}
+            </Link>
+          </figcaption>
+        </figure>
+      ))}
     </div>
   );
 }

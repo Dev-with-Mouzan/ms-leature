@@ -2,22 +2,21 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, BookOpen, ExternalLink } from "lucide-react";
 
-import { books } from "@/lib/books";
-import { getReviews } from "@/lib/reviews";
+import { getBooks, getReviews } from "@/lib/api";
 import { siteConfig } from "@/lib/site";
 import BookCard from "@/components/BookCard";
 import FeaturedBook from "@/components/FeaturedBook";
 import ReviewCarousel from "@/components/ReviewCarousel";
 import Reveal from "@/components/Reveal";
 
-const own = books.filter((b) => b.author === siteConfig.author.name);
-const featured = own[0];
-/** All three titles, compact, so the section shows the whole library. */
-const library = books;
-
 export default async function HomeView() {
   const { author } = siteConfig;
-  const reviews = await getReviews();
+  const [books, reviews] = await Promise.all([getBooks(), getReviews()]);
+
+  const own = books.filter((b) => b.author === author.name);
+  const featured = own[0];
+  /** All titles, compact, so the section shows the whole library. */
+  const library = books;
 
   return (
     <>

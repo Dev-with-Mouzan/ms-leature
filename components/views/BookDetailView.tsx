@@ -17,12 +17,14 @@ import Reveal from "@/components/Reveal";
 export default function BookDetailView({
   book,
   reviews = [],
+  allBooks = [],
 }: {
   book: Book;
   reviews?: Review[];
+  allBooks?: Book[];
 }) {
   const [readerOpen, setReaderOpen] = useState(false);
-  const more = relatedBooks(book, 3);
+  const more = relatedBooks(book, allBooks, 3);
   const byAuthor = book.author === siteConfig.author.name;
 
   const facts = [

@@ -1,22 +1,24 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { books, getBookBySlug, categoryLabels } from "@/lib/books";
-import { getReviewsForBook } from "@/lib/reviews";
+import { categoryLabels } from "@/lib/books";
+import { getBook, getBooks, getReviewsForBook } from "@/lib/api";
 import { siteConfig } from "@/lib/site";
 import BookDetailView from "@/components/views/BookDetailView";
 
 type Params = { params: Promise<{ slug: string }> };
 
-/** Reader reviews are live data, so pages revalidate every minute. */
+/**
+ * Books and reviews are live data now that an admin can add and remove books,
+ * so pages revalidate every minute instead of being prerendered at build time.
+ * There is deliberately no generateStaticParams: a build cannot know the slugs
+ * an admin will create later, and calling the backend during a build would
+ * mean calling the function that same build is producing.
+ */
 export const revalidate = 60;
-
-export function generateStaticParams() {
-  return books.map((book) => ({ slug: book.slug }));
-}
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug } = await params;
-  const book = getBookBySlug(slug);
+  const book = await getBook(slug);
   if (!book) return { title: "Book not found" };
 
   // Trim to a clean sentence-ish length for the meta description.
@@ -60,11 +62,14 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 export default async function BookDetailPage({ params }: Params) {
   const { slug } = await params;
-  const book = getBookBySlug(slug);
+  const book = await getBook(slug);
   if (!book) notFound();
 
   const byAuthor = book.author === siteConfig.author.name;
-  const reviews = await getReviewsForBook(book.slug);
+  const [reviews, allBooks] = await Promise.all([
+    getReviewsForBook(book.slug),
+    getBooks(),
+  ]);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -120,7 +125,7 @@ export default async function BookDetailPage({ params }: Params) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <BookDetailView book={book} reviews={reviews} />
+      <BookDetailView book={book} reviews={reviews} allBooks={allBooks} />
     </>
   );
 }
